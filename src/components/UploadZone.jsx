@@ -1,6 +1,13 @@
 import { useState, useCallback } from "react";
 import { uploadImages } from "../api/client";
 
+function formatBytes(bytes) {
+  if (!bytes) return "0 Mo";
+  const mb = bytes / (1024 * 1024);
+  return `${mb.toFixed(2)} Mo`;
+}
+
+
 // utilitaire pour récupérer largeur/hauteur d'une image
 const getImageDimensions = (file) => {
   return new Promise((resolve, reject) => {
@@ -136,6 +143,11 @@ function UploadZone() {
     if (!allFiles.length) return;
     const data = await uploadImages(allFiles);
     console.log("Upload terminé:", data);
+    console.log("Préparation upload :");
+    console.log("Nombre total de photos :", totalFilesCount);
+    console.log("Taille totale (bytes) :", totalBytes);
+    console.log("Taille totale (formatée) :", totalSizeLabel);
+
   };
 
   const openShoot = shoots.find((s) => s.id === openShootId) || null;
@@ -166,9 +178,30 @@ function UploadZone() {
     setEditingName("");
   };
 
+  const totalFilesCount = shoots.reduce(
+    (acc, shoot) => acc + shoot.files.length,
+    0
+  );
+
+  const totalBytes = shoots.reduce(
+    (acc, shoot) =>
+      acc + shoot.files.reduce((s, f) => s + (f.size || 0), 0),
+    0
+  );
+
+  const totalSizeLabel = formatBytes(totalBytes);
+
+
   return (
     <div id="upload-section">
       <h2>Importer un shooting</h2>
+
+      <div className="upload-summary">
+        <span>{totalFilesCount} photo(s) au total</span>
+        <span>•</span>
+        <span>Taille estimée : {totalSizeLabel}</span>
+      </div>
+
 
       {/* Filtre par taille */}
       <div className="size-filter">

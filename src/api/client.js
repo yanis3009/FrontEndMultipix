@@ -14,11 +14,6 @@ export async function searchImages({ mode, query, imageFiles }) {
   // const res = await fetch(`${API_BASE}/search`, { method: "POST", body: formData });
   // return await res.json();
 
-  console.log("payload /search :", {
-    mode,
-    query,
-    nbImages: imageFiles?.length || 0,
-  });
   return { results: [] };
 }
 export async function uploadImages(files) {
