@@ -7,7 +7,6 @@ function formatBytes(bytes) {
   return `${mb.toFixed(2)} Mo`;
 }
 
-
 // utilitaire pour récupérer largeur/hauteur d'une image
 const getImageDimensions = (file) => {
   return new Promise((resolve, reject) => {
@@ -30,8 +29,7 @@ const getImageDimensions = (file) => {
   });
 };
 
-function UploadZone() {
-  const [shoots, setShoots] = useState([]); // [{ id, name, files: File[] }]
+function UploadZone({ shoots, setShoots }) {
   const [selectedShootId, setSelectedShootId] = useState(null); // destination d'import
   const [openShootId, setOpenShootId] = useState(null); // shooting ouvert dans la modale
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -45,6 +43,36 @@ function UploadZone() {
   // renommage de shooting (dans la modale)
   const [editingShootId, setEditingShootId] = useState(null);
   const [editingName, setEditingName] = useState("");
+
+  // helper pour créer un nouveau shooting depuis l'extérieur (TagSearchPanel, etc.)
+  // (on ne l'utilise pas ici directement mais la logique est centralisée)
+  const createNewShoot = (name, files) => {
+    setShoots((prevShoots) => {
+      const newId = crypto.randomUUID();
+      const index = prevShoots.length + 1;
+      const newShoot = {
+        id: newId,
+        name: name || `Shooting ${index}`,
+        files: files,
+      };
+      return [...prevShoots, newShoot];
+    });
+  };
+
+  // supprimer un shooting complet
+  const removeShoot = (shootId) => {
+    setShoots((prevShoots) => prevShoots.filter((s) => s.id !== shootId));
+
+    if (shootId === openShootId) {
+      setOpenShootId(null);
+      setIsModalOpen(false);
+      setSelectedIndex(null);
+      setIsImageModalOpen(false);
+    }
+    if (shootId === selectedShootId) {
+      setSelectedShootId(null);
+    }
+  };
 
   // filtrage par type + dimensions + distribution vers le bon shooting
   const handleFiles = useCallback(
@@ -103,7 +131,7 @@ function UploadZone() {
         return [...prevShoots, newShoot];
       });
     },
-    [maxWidth, maxHeight, selectedShootId]
+    [maxWidth, maxHeight, selectedShootId, setShoots]
   );
 
   const onDrop = (e) => {
@@ -147,7 +175,6 @@ function UploadZone() {
     console.log("Nombre total de photos :", totalFilesCount);
     console.log("Taille totale (bytes) :", totalBytes);
     console.log("Taille totale (formatée) :", totalSizeLabel);
-
   };
 
   const openShoot = shoots.find((s) => s.id === openShootId) || null;
@@ -191,7 +218,6 @@ function UploadZone() {
 
   const totalSizeLabel = formatBytes(totalBytes);
 
-
   return (
     <div id="upload-section">
       <h2>Importer un shooting</h2>
@@ -201,7 +227,6 @@ function UploadZone() {
         <span>•</span>
         <span>Taille estimée : {totalSizeLabel}</span>
       </div>
-
 
       {/* Filtre par taille */}
       <div className="size-filter">
@@ -289,27 +314,35 @@ function UploadZone() {
       {/* Liste des shootings */}
       <div className="shoots-list">
         {shoots.map((shoot) => (
-          <div
-            key={shoot.id}
-            className="shoot-folder"
-            onClick={() => {
-              setOpenShootId(shoot.id);
-              setIsModalOpen(true);
-              setSelectedIndex(0);
-            }}
-          >
-            <div className="folder-icon">📁</div>
-            <div className="folder-info">
-              <div className="folder-name">{shoot.name}</div>
-              <div className="folder-count">
-                {shoot.files.length} photos importées
+          <div key={shoot.id} className="shoot-folder-wrapper">
+            <div
+              className="shoot-folder"
+              onClick={() => {
+                setOpenShootId(shoot.id);
+                setIsModalOpen(true);
+                setSelectedIndex(0);
+              }}
+            >
+              <div className="folder-icon">📁</div>
+              <div className="folder-info">
+                <div className="folder-name">{shoot.name}</div>
+                <div className="folder-count">
+                  {shoot.files.length} photos importées
+                </div>
               </div>
             </div>
+            <button
+              type="button"
+              className="remove-shoot-btn"
+              onClick={() => removeShoot(shoot.id)}
+            >
+              Supprimer
+            </button>
           </div>
         ))}
       </div>
 
-      {/* Modal shooting (vignettes + suppression + clic pour agrandir + renommage) */}
+      {/* Modal shooting */}
       {isModalOpen && openShoot && (
         <div
           className="modal-backdrop"
@@ -318,10 +351,7 @@ function UploadZone() {
             setSelectedIndex(null);
           }}
         >
-          <div
-            className="modal"
-            onClick={(e) => e.stopPropagation()}
-          >
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
             <button
               className="modal-close"
               onClick={() => {
@@ -384,7 +414,7 @@ function UploadZone() {
         </div>
       )}
 
-      {/* Modal image agrandie avec navigation */}
+      {/* Modal image agrandie */}
       {isImageModalOpen && currentFile && openShoot && (
         <div
           className="modal-backdrop"
@@ -417,7 +447,11 @@ function UploadZone() {
             <img
               src={currentUrl}
               alt={currentFile.name}
-              style={{ maxWidth: "90vw", maxHeight: "80vh", objectFit: "contain" }}
+              style={{
+                maxWidth: "90vw",
+                maxHeight: "80vh",
+                objectFit: "contain",
+              }}
             />
 
             {/* Flèche droite */}

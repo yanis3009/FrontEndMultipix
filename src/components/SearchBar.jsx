@@ -1,23 +1,6 @@
 import { useState } from "react";
 import { searchImages } from "../api/client";
 
-const PREDEFINED_TAGS = [
-  "naturel",
-  "posé",
-  "spontané",
-  "artistique",
-  "studio",
-  "extérieur",
-  "intérieur",
-  "mariage",
-  "portrait-pro",
-  "famille",
-  "couple",
-  "golden-hour",
-  "noir-et-blanc",
-];
-
-// renvoie "portrait", "landscape" ou "unknown" d'après width/height
 function getOrientationFromDimensions(width, height) {
   if (!width || !height) return "unknown";
   if (height > width) return "portrait";
@@ -25,7 +8,6 @@ function getOrientationFromDimensions(width, height) {
   return "unknown";
 }
 
-// filtre les fichiers entre deux datetimes + orientation + taille
 function filterFilesByDateOrientationAndSize(
   files,
   startStr,
@@ -42,10 +24,9 @@ function filterFilesByDateOrientationAndSize(
   const maxH = maxHeightStr ? Number(maxHeightStr) : Infinity;
 
   return files.filter((file) => {
-    const fileTime = file.lastModified; // ms depuis 1970
+    const fileTime = file.lastModified;
     if (fileTime < startTime || fileTime > endTime) return false;
 
-    // Orientation
     if (orientation !== "any") {
       const width = file._width;
       const height = file._height;
@@ -59,7 +40,6 @@ function filterFilesByDateOrientationAndSize(
       }
     }
 
-    // Taille
     if (excludeLarge) {
       const width = file._width;
       const height = file._height;
@@ -71,40 +51,74 @@ function filterFilesByDateOrientationAndSize(
   });
 }
 
-function SearchBar() {
+function SearchBar({ shoots }) {
   const [query, setQuery] = useState("");
-  const [mode, setMode] = useState("text");
-  const [queryImages, setQueryImages] = useState([]); // plusieurs images
-
-  const [tags, setTags] = useState([]); // liste des tags actuels
-  const [isTagModalOpen, setIsTagModalOpen] = useState(false);
-  const [newTag, setNewTag] = useState("");
+  const [mode, setMode] = useState("text"); // text | image | hybrid | faces
+  const [queryImages, setQueryImages] = useState([]);
+  const [faceQueryImages, setFaceQueryImages] = useState([]); // visages de référence
+  const [faceFilterMode, setFaceFilterMode] = useState("union"); // union | intersection
 
   const [history, setHistory] = useState([]);
-  // chaque entrée : { id, mode, query, images, tags }
 
-  // Filtres avancés
-  const [dateRangeStart, setDateRangeStart] = useState(""); // datetime-local
+  const [dateRangeStart, setDateRangeStart] = useState("");
   const [dateRangeEnd, setDateRangeEnd] = useState("");
-  const [orientationFilter, setOrientationFilter] = useState("any"); // any | portrait | landscape
+  const [orientationFilter, setOrientationFilter] = useState("any");
   const [excludeLargeImages, setExcludeLargeImages] = useState(false);
   const [maxWidth, setMaxWidth] = useState("");
   const [maxHeight, setMaxHeight] = useState("");
 
+  const [selectedShootIds, setSelectedShootIds] = useState([]);
+
+  const toggleShootSelection = (shootId) => {
+    setSelectedShootIds((prev) =>
+      prev.includes(shootId)
+        ? prev.filter((id) => id !== shootId)
+        : [...prev, shootId]
+    );
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    // Pour text / image / hybrid : garder la logique existante
     if (mode === "text" && !query.trim()) return;
-    if ((mode === "image" || mode === "hybrid") && queryImages.length === 0) {
+
+    let baseImages = [];
+
+    if (selectedShootIds.length > 0) {
+      const fromShoots = shoots
+        .filter((s) => selectedShootIds.includes(s.id))
+        .flatMap((s) => s.files || []);
+      baseImages = fromShoots;
+    } else if (mode === "image" || mode === "hybrid") {
+      baseImages = queryImages;
+    }
+
+    // Pour le mode visages, les images de base sont les dossiers sélectionnés
+    if (mode === "faces") {
+      if (selectedShootIds.length === 0) {
+        // pour l’instant on force le choix d’au moins un dossier
+        return;
+      }
+      baseImages = shoots
+        .filter((s) => selectedShootIds.includes(s.id))
+        .flatMap((s) => s.files || []);
+      if (baseImages.length === 0) return;
+      if (faceQueryImages.length === 0) return; // pas de visages fournis
+    }
+
+    if (
+      (mode === "image" || mode === "hybrid") &&
+      baseImages.length === 0
+    ) {
       return;
     }
 
-    // Filtre période + orientation + taille sur les images de requête
     const filteredImages =
-      mode === "text"
+      mode === "text" && selectedShootIds.length === 0
         ? []
         : filterFilesByDateOrientationAndSize(
-            queryImages,
+            baseImages,
             dateRangeStart,
             dateRangeEnd,
             orientationFilter,
@@ -115,9 +129,9 @@ function SearchBar() {
 
     const payload = {
       mode,
-      query: mode === "image" ? "" : query,
+      query: mode === "image" || mode === "faces" ? "" : query,
       imageFiles: filteredImages,
-      tags, // tableau de strings pour le backend
+      tags: [],
       filters: {
         dateRange: {
           start: dateRangeStart || null,
@@ -127,23 +141,28 @@ function SearchBar() {
         excludeLargeImages,
         maxWidth: maxWidth || null,
         maxHeight: maxHeight || null,
+        shootIds: selectedShootIds,
+        // parties spécifiques aux visages
+        faceFilterMode: mode === "faces" ? faceFilterMode : null,
       },
+      // visages à utiliser côté back pour filter_union / filter_intersection
+      faceQueryImages: mode === "faces" ? faceQueryImages : [],
     };
 
-    // Ajout à l'historique (limité aux 5 dernières recherches)
     setHistory((prev) => {
       const newEntry = {
         id: Date.now(),
         mode: payload.mode,
         query: payload.query,
         images: payload.imageFiles,
-        tags: payload.tags,
+        tags: [],
       };
       const list = [newEntry, ...prev];
       return list.slice(0, 5);
     });
 
-    console.log("Images avant filtre date/orientation/taille :", queryImages);
+    console.log("Shoots sélectionnés :", selectedShootIds);
+    console.log("Base images :", baseImages);
     console.log("Images après filtre date/orientation/taille :", filteredImages);
     console.log("payload /search :", payload);
 
@@ -174,8 +193,6 @@ function SearchBar() {
     e.preventDefault();
     e.stopPropagation();
     const files = Array.from(e.dataTransfer.files || []);
-    theimages = files.filter((f) => f.type.startsWith("image/"));
-
     const images = files.filter((f) => f.type.startsWith("image/"));
     images.forEach((file) => {
       const url = URL.createObjectURL(file);
@@ -197,6 +214,31 @@ function SearchBar() {
     setQueryImages((prev) => [...prev, ...images]);
   };
 
+  // gestion des images de visages
+  const handleFaceImagesChange = (e) => {
+    const files = Array.from(e.target.files || []);
+    const images = files.filter((f) => f.type.startsWith("image/"));
+    setFaceQueryImages((prev) => [...prev, ...images]);
+  };
+
+  const handleFaceDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const files = Array.from(e.dataTransfer.files || []);
+    const images = files.filter((f) => f.type.startsWith("image/"));
+    setFaceQueryImages((prev) => [...prev, ...images]);
+  };
+
+  const removeFaceImageAtIndex = (indexToRemove) => {
+    setFaceQueryImages((prev) =>
+      prev.filter((_, idx) => idx !== indexToRemove)
+    );
+  };
+
+  const removeQueryImageAtIndex = (indexToRemove) => {
+    setQueryImages((prev) => prev.filter((_, idx) => idx !== indexToRemove));
+  };
+
   const handleModeChange = (e) => {
     const newMode = e.target.value;
     setMode(newMode);
@@ -206,54 +248,51 @@ function SearchBar() {
     } else if (newMode === "image") {
       setQuery("");
     }
+    // pour faces, on laisse query tel quel, car non utilisé
   };
 
   return (
     <div className="search-layout">
-      {/* Colonne gauche : formulaire de recherche */}
       <div id="search-section">
         <h2>Recherche / Filtrage</h2>
 
         <form onSubmit={handleSubmit}>
-          {/* Choix du mode */}
           <div>
             <label>Mode :</label>
             <select value={mode} onChange={handleModeChange}>
               <option value="text">Texte</option>
               <option value="image">Image</option>
               <option value="hybrid">Hybride</option>
+              <option value="faces">Visages</option>
             </select>
           </div>
 
-          {/* Sélection des tags */}
-          <div className="search-tags-row">
-            <button
-              type="button"
-              className="tag-select-btn"
-              onClick={() => setIsTagModalOpen(true)}
-            >
-              Sélection de tags
-            </button>
-
-            <div className="selected-tags">
-              {tags.map((tag) => (
-                <span key={tag} className="tag-pill">
-                  <span className="tag-label">{tag}</span>
-                  <button
-                    type="button"
-                    className="tag-remove-btn"
-                    onClick={() =>
-                      setTags((prev) => prev.filter((t) => t !== tag))
-                    }
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
+          <div className="shoot-filter-section">
+            <h3>Dossiers de shooting</h3>
+            {shoots.length === 0 && (
+              <p style={{ fontSize: "0.9rem" }}>
+                Aucun shooting importé pour l’instant.
+              </p>
+            )}
+            <div className="shoot-checkbox-list">
+              {shoots.map((shoot) => {
+                const checked = selectedShootIds.includes(shoot.id);
+                return (
+                  <label key={shoot.id} className="shoot-checkbox-item">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleShootSelection(shoot.id)}
+                    />
+                    <span>
+                      {shoot.name} ({shoot.files.length} photos)
+                    </span>
+                  </label>
+                );
+              })}
             </div>
           </div>
 
-          {/* Filtres avancés */}
           <div className="search-filters-advanced">
             <div className="filter-item">
               <label>Du :</label>
@@ -317,7 +356,6 @@ function SearchBar() {
             </div>
           </div>
 
-          {/* Champ texte visible seulement si mode != image */}
           {(mode === "text" || mode === "hybrid") && (
             <div>
               <label>Requête texte :</label>
@@ -330,7 +368,6 @@ function SearchBar() {
             </div>
           )}
 
-          {/* Zone images visible seulement si mode != text */}
           {(mode === "image" || mode === "hybrid") && (
             <>
               <div
@@ -366,13 +403,94 @@ function SearchBar() {
 
               <div className="preview-grid">
                 {queryImages.map((file, idx) => (
-                  <img
-                    key={idx}
-                    className="preview-thumb"
-                    src={URL.createObjectURL(file)}
-                    alt={file.name}
-                  />
+                  <div key={idx} className="preview-item">
+                    <img
+                      className="preview-thumb"
+                      src={URL.createObjectURL(file)}
+                      alt={file.name}
+                    />
+                    <button
+                      type="button"
+                      className="remove-image-btn"
+                      onClick={() => removeQueryImageAtIndex(idx)}
+                    >
+                      ×
+                    </button>
+                  </div>
                 ))}
+              </div>
+            </>
+          )}
+
+          {mode === "faces" && (
+            <>
+              <div className="face-mode-section">
+                <h3>Filtre visages</h3>
+                <div className="filter-item">
+                  <label>Mode de filtrage :</label>
+                  <select
+                    value={faceFilterMode}
+                    onChange={(e) => setFaceFilterMode(e.target.value)}
+                  >
+                    <option value="union">
+                      Au moins une de ces personnes (union)
+                    </option>
+                    <option value="intersection">
+                      Toutes ces personnes ensemble (intersection)
+                    </option>
+                  </select>
+                </div>
+
+                <div
+                  className="dropzone"
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                  onDrop={handleFaceDrop}
+                  onClick={() =>
+                    document.getElementById("face-file-input").click()
+                  }
+                >
+                  {faceQueryImages.length === 0 ? (
+                    <span>
+                      Glisse une ou plusieurs photos de visages ici ou clique
+                      pour choisir
+                    </span>
+                  ) : (
+                    <span>
+                      {faceQueryImages.length} visage(s) de requête sélectionné(s)
+                    </span>
+                  )}
+
+                  <input
+                    id="face-file-input"
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    hidden
+                    onChange={handleFaceImagesChange}
+                  />
+                </div>
+
+                <div className="preview-grid">
+                  {faceQueryImages.map((file, idx) => (
+                    <div key={idx} className="preview-item">
+                      <img
+                        className="preview-thumb"
+                        src={URL.createObjectURL(file)}
+                        alt={file.name}
+                      />
+                      <button
+                        type="button"
+                        className="remove-image-btn"
+                        onClick={() => removeFaceImageAtIndex(idx)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
             </>
           )}
@@ -380,82 +498,11 @@ function SearchBar() {
           <button type="submit">Lancer la recherche</button>
         </form>
 
-        {/* Pop-up de sélection / ajout de tags */}
-        {isTagModalOpen && (
-          <div
-            className="modal-backdrop"
-            onClick={() => setIsTagModalOpen(false)}
-          >
-            <div
-              className="modal-content"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <h3>Sélection de tags</h3>
-
-              <div className="tag-checkbox-list">
-                {PREDEFINED_TAGS.map((tag) => {
-                  const checked = tags.includes(tag);
-                  return (
-                    <label key={tag} className="tag-checkbox-item">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setTags((prev) =>
-                              prev.includes(tag) ? prev : [...prev, tag]
-                            );
-                          } else {
-                            setTags((prev) => prev.filter((t) => t !== tag));
-                          }
-                        }}
-                      />
-                      <span>{tag}</span>
-                    </label>
-                  );
-                })}
-              </div>
-
-              {/* Option pour ajouter un tag libre en plus */}
-              <form
-                className="tag-new-form"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const trimmed = newTag.trim();
-                  if (!trimmed) return;
-                  setTags((prev) =>
-                    prev.includes(trimmed) ? prev : [...prev, trimmed]
-                  );
-                  setNewTag("");
-                }}
-              >
-                <input
-                  type="text"
-                  placeholder="Ajouter un tag libre"
-                  value={newTag}
-                  onChange={(e) => setNewTag(e.target.value)}
-                />
-                <button type="submit">Ajouter</button>
-              </form>
-
-              <div className="modal-actions">
-                <button
-                  type="button"
-                  onClick={() => setIsTagModalOpen(false)}
-                >
-                  Valider
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
         <div id="results" className="preview-grid">
           {/* plus tard : afficher les résultats retournés par l’API */}
         </div>
       </div>
 
-      {/* Colonne droite : historique des recherches */}
       <div className="search-history-section">
         <h3>Recherches récentes</h3>
         {history.length === 0 && <p>Aucune recherche pour l’instant.</p>}
@@ -469,16 +516,10 @@ function SearchBar() {
                 setMode(item.mode);
                 setQuery(item.query || "");
                 setQueryImages(item.images || []);
-                setTags(item.tags || []);
               }}
             >
               <div className="history-header">
                 <span className="history-mode">{item.mode}</span>
-                {item.tags && item.tags.length > 0 && (
-                  <span className="history-tags">
-                    {item.tags.join(", ")}
-                  </span>
-                )}
               </div>
 
               {item.query && (
